@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadogagent
 
@@ -116,7 +116,7 @@ func (r *Reconciler) cleanupConfigMap(logger logr.Logger, dda *datadoghqv1alpha1
 		}
 		return reconcile.Result{}, err
 	}
-	if !ownedByDatadogOperator(configmap.OwnerReferences) {
+	if !CheckOwnerReference(dda, configmap) {
 		return reconcile.Result{}, nil
 	}
 	logger.V(1).Info("deleteConfigMap", "configMap.name", configmap.Name, "configMap.Namespace", configmap.Namespace)
@@ -138,7 +138,7 @@ func buildConfigurationConfigMap(dda *datadoghqv1alpha1.DatadogAgent, cfcm *data
 	// Maybe later we can implement that directly verifies against Agent configuration?
 	m := make(map[interface{}]interface{})
 	if err := yaml.Unmarshal([]byte(configData), m); err != nil {
-		return nil, fmt.Errorf("unable to parse YAML from 'customConfig.ConfigData' field: %v", err)
+		return nil, fmt.Errorf("unable to parse YAML from 'customConfig.ConfigData' field: %w", err)
 	}
 
 	configMap := &corev1.ConfigMap{

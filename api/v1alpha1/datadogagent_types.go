@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package v1alpha1
 
@@ -21,6 +21,8 @@ type DatadogFeatures struct {
 	OrchestratorExplorer *OrchestratorExplorerConfig `json:"orchestratorExplorer,omitempty"`
 	// KubeStateMetricsCore configuration
 	KubeStateMetricsCore *KubeStateMetricsCore `json:"kubeStateMetricsCore,omitempty"`
+	// PrometheusScrape configuration
+	PrometheusScrape *PrometheusScrapeConfig `json:"prometheusScrape,omitempty"`
 }
 
 // DatadogAgentSpec defines the desired state of DatadogAgent
@@ -57,9 +59,9 @@ type DatadogAgentSpec struct {
 	Site string `json:"site,omitempty"`
 }
 
-// AgentCredentials contains credentials values to configure the Agent
+// DatadogCredentials is a generic structure that holds credentials to access Datadog
 // +k8s:openapi-gen=true
-type AgentCredentials struct {
+type DatadogCredentials struct {
 	// APIKey Set this to your Datadog API key before the Agent runs.
 	// ref: https://app.datadoghq.com/account/settings#agent/kubernetes
 	APIKey string `json:"apiKey,omitempty"`
@@ -92,6 +94,12 @@ type AgentCredentials struct {
 	// If set, this parameter takes precedence over "apiKey" and "appKeyExistingSecret".
 	// +optional
 	APPSecret *Secret `json:"appSecret,omitempty"`
+}
+
+// AgentCredentials contains credentials values to configure the Agent
+// +k8s:openapi-gen=true
+type AgentCredentials struct {
+	DatadogCredentials `json:",inline"`
 
 	// This needs to be at least 32 characters a-zA-z
 	// It is a preshared key between the node agents and the cluster agent
@@ -295,6 +303,13 @@ type APMSpec struct {
 	// +listMapKey=name
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
+	// Specify additional volume mounts in the APM Agent container
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +listMapKey=mountPath
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
 	// Datadog APM Agent resource requests and limits
 	// Make sure to keep requests and limits equal to keep the pods in the Guaranteed QoS class
 	// Ref: http://kubernetes.io/docs/user-guide/compute-resources/
@@ -392,6 +407,13 @@ type ProcessSpec struct {
 	// +listMapKey=name
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
+	// Specify additional volume mounts in the Process Agent container
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +listMapKey=mountPath
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
 	// Datadog Process Agent resource requests and limits
 	// Make sure to keep requests and limits equal to keep the pods in the Guaranteed QoS class
 	// Ref: http://kubernetes.io/docs/user-guide/compute-resources/
@@ -445,6 +467,20 @@ type OrchestratorExplorerConfig struct {
 type Scrubbing struct {
 	// Deactivate this to stop the scrubbing of sensitive container data (passwords, tokens, etc. ).
 	Containers *bool `json:"containers,omitempty"`
+}
+
+// PrometheusScrapeConfig allows configuring Prometheus Autodiscovery feature
+// +k8s:openapi-gen=true
+type PrometheusScrapeConfig struct {
+	// Enable autodiscovering pods and services exposing prometheus metrics.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+	// ServiceEndpoints enables generating dedicated checks for service endpoints.
+	// +optional
+	ServiceEndpoints *bool `json:"serviceEndpoints,omitempty"`
+	// AdditionalConfigs allows adding advanced prometheus check configurations with custom discovery rules.
+	// +optional
+	AdditionalConfigs *string `json:"additionalConfigs,omitempty"`
 }
 
 // SystemProbeSpec contains the SystemProbe Agent configuration
@@ -528,6 +564,13 @@ type SecuritySpec struct {
 	// +listType=map
 	// +listMapKey=name
 	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Specify additional volume mounts in the Security Agent container
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +listMapKey=mountPath
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 
 	// Datadog Security Agent resource requests and limits
 	// Make sure to keep requests and limits equal to keep the pods in the Guaranteed QoS class
@@ -725,6 +768,12 @@ type DogstatsdConfig struct {
 	// ref: https://docs.datadoghq.com/developers/dogstatsd/unix_socket/
 	// +optional
 	UnixDomainSocket *DSDUnixDomainSocketSpec `json:"unixDomainSocket,omitempty"`
+
+	// Configure the Dogstasd Mapper Profiles
+	// Can be passed as raw data or via a json encoded string in a config map
+	// ref: https://docs.datadoghq.com/developers/dogstatsd/dogstatsd_mapper/
+	// +optional
+	MapperProfiles *CustomConfigSpec `json:"mapperProfiles,omitempty"`
 }
 
 // DSDUnixDomainSocketSpec contains the Dogstatsd Unix Domain Socket configuration
@@ -877,6 +926,11 @@ type ExternalMetricsConfig struct {
 	// empty.
 	// +optional
 	Endpoint *string `json:"endpoint,omitempty"`
+
+	// Datadog credentials used by external metrics server to query Datadog.
+	// If not set, the external metrics server uses the global .spec.Credentials
+	// +optional
+	Credentials *DatadogCredentials `json:"credentials,omitempty"`
 }
 
 // AdmissionControllerConfig contains the configuration of the admission controller in Cluster Agent
@@ -988,9 +1042,9 @@ type DatadogAgentSpecClusterChecksRunnerSpec struct {
 // +k8s:openapi-gen=true
 type ImageConfig struct {
 	// Define the image to use
-	// Use "datadog/agent:latest" for Datadog Agent 6
+	// Use "gcr.io/datadoghq/agent:latest" for Datadog Agent 6
 	// Use "datadog/dogstatsd:latest" for Standalone Datadog Agent DogStatsD6
-	// Use "datadog/cluster-agent:latest" for Datadog Cluster Agent
+	// Use "gcr.io/datadoghq/cluster-agent:latest" for Datadog Cluster Agent
 	Name string `json:"name"`
 
 	// The Kubernetes pull policy
@@ -1133,17 +1187,17 @@ type DatadogAgentCondition struct {
 type DatadogAgentConditionType string
 
 const (
-	// ConditionTypeActive DatadogAgent is active
-	ConditionTypeActive DatadogAgentConditionType = "Active"
-	// ConditionTypeReconcileError the controller wasn't able to run properly the reconcile loop with this DatadogAgent
-	ConditionTypeReconcileError DatadogAgentConditionType = "ReconcileError"
-	// ConditionTypeSecretError the required Secret doesn't exist.
-	ConditionTypeSecretError DatadogAgentConditionType = "SecretError"
+	// DatadogAgentConditionTypeActive DatadogAgent is active
+	DatadogAgentConditionTypeActive DatadogAgentConditionType = "Active"
+	// DatadogAgentConditionTypeReconcileError the controller wasn't able to run properly the reconcile loop with this DatadogAgent
+	DatadogAgentConditionTypeReconcileError DatadogAgentConditionType = "ReconcileError"
+	// DatadogAgentConditionTypeSecretError the required Secret doesn't exist.
+	DatadogAgentConditionTypeSecretError DatadogAgentConditionType = "SecretError"
 
-	// ConditionTypeActiveDatadogMetrics forwarding metrics and events to Datadog is active
-	ConditionTypeActiveDatadogMetrics DatadogAgentConditionType = "ActiveDatadogMetrics"
-	// ConditionTypeDatadogMetricsError cannot forward deployment metrics and events to Datadog
-	ConditionTypeDatadogMetricsError DatadogAgentConditionType = "DatadogMetricsError"
+	// DatadogMetricsActive forwarding metrics and events to Datadog is active
+	DatadogMetricsActive DatadogAgentConditionType = "ActiveDatadogMetrics"
+	// DatadogMetricsError cannot forward deployment metrics and events to Datadog
+	DatadogMetricsError DatadogAgentConditionType = "DatadogMetricsError"
 )
 
 // DatadogAgent Deployment with Datadog Operator

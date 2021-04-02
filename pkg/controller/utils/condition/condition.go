@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package condition
 
@@ -42,6 +42,7 @@ func UpdateDatadogAgentStatusCondition(condition *datadoghqv1alpha1.DatadogAgent
 	}
 	condition.LastUpdateTime = now
 	condition.Message = desc
+
 	return condition
 }
 
@@ -72,11 +73,13 @@ func getIndexForConditionType(status *datadoghqv1alpha1.DatadogAgentStatus, t da
 	if status == nil {
 		return idCondition
 	}
+
 	for i, condition := range status.Conditions {
 		if condition.Type == t {
 			idCondition = i
 			break
 		}
 	}
+
 	return idCondition
 }

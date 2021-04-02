@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadog
 
@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
-	"os"
 	"reflect"
 	"sync"
 	"time"
@@ -85,8 +84,9 @@ type metricsForwarder struct {
 	decryptor           secrets.Decryptor
 	creds               sync.Map
 	baseURL             string
+	status              *datadoghqv1alpha1.DatadogAgentCondition
+	credsManager        *config.CredentialManager
 	sync.Mutex
-	status *datadoghqv1alpha1.DatadogAgentCondition
 }
 
 // delegatedAPI is used for testing purpose, it serves for mocking the Datadog API
@@ -114,6 +114,7 @@ func newMetricsForwarder(k8sClient client.Client, decryptor secrets.Decryptor, o
 		creds:               sync.Map{},
 		baseURL:             defaultbaseURL,
 		logger:              log.WithValues("CustomResource.Namespace", obj.GetNamespace(), "CustomResource.Name", obj.GetName()),
+		credsManager:        config.NewCredentialManager(),
 	}
 }
 
@@ -131,7 +132,7 @@ func (mf *metricsForwarder) start(wg *sync.WaitGroup) {
 	// wait.PollImmediateUntil is blocking until mf.connectToDatadogAPI returns true or stopChan is closed
 	// wait.PollImmediateUntil keeps retrying to connect to the Datadog API without returning an error
 	// wait.PollImmediateUntil returns an error only when stopChan is closed
-	if err := wait.PollImmediateUntil(mf.retryInterval, mf.connectToDatadogAPI, mf.stopChan); err == wait.ErrWaitTimeout {
+	if err := wait.PollImmediateUntil(mf.retryInterval, mf.connectToDatadogAPI, mf.stopChan); errors.Is(err, wait.ErrWaitTimeout) {
 		// stopChan was closed while trying to connect to Datadog API
 		// The metrics forwarder stopped by the ForwardersManager
 		mf.logger.Info("Shutting down Datadog metrics forwarder")
@@ -293,7 +294,7 @@ func (mf *metricsForwarder) prepareReconcileMetric(reconcileErr error) (float64,
 	var metricValue float64
 	var tags []string
 
-	if reconcileErr == errInitValue {
+	if errors.Is(reconcileErr, errInitValue) {
 		// Metrics forwarder didn't receive any reconcile error
 		// lastReconcileErr has never been updated
 		return metricValue, nil, errors.New("last reconcile error not updated")
@@ -360,11 +361,12 @@ func (mf *metricsForwarder) delegatedValidateCreds(apiKey, appKey string) (*api.
 	datadogClient.SetBaseUrl(mf.baseURL)
 	valid, err := datadogClient.Validate()
 	if err != nil {
-		return nil, fmt.Errorf("cannot validate datadog credentials: %v", err)
+		return nil, fmt.Errorf("cannot validate datadog credentials: %w", err)
 	}
 	if !valid {
 		return nil, fmt.Errorf("invalid datadog credentials on %s", mf.baseURL)
 	}
+
 	return datadogClient, nil
 }
 
@@ -478,6 +480,7 @@ func hashKeys(apiKey, appKey string) uint64 {
 	h := fnv.New64()
 	_, _ = h.Write([]byte(apiKey))
 	_, _ = h.Write([]byte(appKey))
+
 	return h.Sum64()
 }
 
@@ -485,36 +488,45 @@ func hashKeys(apiKey, appKey string) uint64 {
 func (mf *metricsForwarder) getDatadogAgent() (*datadoghqv1alpha1.DatadogAgent, error) {
 	dda := &datadoghqv1alpha1.DatadogAgent{}
 	err := mf.k8sClient.Get(context.TODO(), mf.namespacedName, dda)
+
 	return dda, err
 }
 
 // getCredentials returns the Datadog API Key and APP Key, it returns an error if one key is missing
+// getCredentials tries to get the credentials from the CRD, then from operator configuration
 func (mf *metricsForwarder) getCredentials(dda *datadoghqv1alpha1.DatadogAgent) (string, string, error) {
+	apiKey, appKey, err := mf.getCredsFromDatadogAgent(dda)
+	if err != nil {
+		if errors.Is(err, ErrEmptyAPIKey) || errors.Is(err, ErrEmptyAPPKey) {
+			// Fallback to the operator config in this case
+			mf.logger.Info("API and/or APP key aren't defined in the Custom Resource, getting credentials from the operator config")
+			var creds config.Creds
+			creds, err = mf.credsManager.GetCredentials()
+			return creds.APIKey, creds.AppKey, err
+		}
+	}
+
+	return apiKey, appKey, err
+}
+
+func (mf *metricsForwarder) getCredsFromDatadogAgent(dda *datadoghqv1alpha1.DatadogAgent) (string, string, error) {
 	var err error
 	apiKey, appKey := "", ""
 
-	// Use API key in order of priority: DatadogAgent spec, env var, or secret
-	switch {
-	case dda.Spec.Credentials.APIKey != "":
+	if dda.Spec.Credentials.APIKey != "" {
 		apiKey = dda.Spec.Credentials.APIKey
-	case os.Getenv(config.DDAPIKeyEnvVar) != "":
-		apiKey = os.Getenv(config.DDAPIKeyEnvVar)
-	default:
-		secretName, secretKeyName := utils.GetAPIKeySecret(dda)
+	} else {
+		_, secretName, secretKeyName := utils.GetAPIKeySecret(&dda.Spec.Credentials.DatadogCredentials, utils.GetDefaultCredentialsSecretName(dda))
 		apiKey, err = mf.getKeyFromSecret(dda, secretName, secretKeyName)
 		if err != nil {
 			return "", "", err
 		}
 	}
 
-	// Use App key in order of priority: DatadogAgent spec, env var, or secret
-	switch {
-	case dda.Spec.Credentials.AppKey != "":
+	if dda.Spec.Credentials.AppKey != "" {
 		appKey = dda.Spec.Credentials.AppKey
-	case os.Getenv(config.DDAppKeyEnvVar) != "":
-		appKey = os.Getenv(config.DDAppKeyEnvVar)
-	default:
-		secretName, secretKeyName := utils.GetAppKeySecret(dda)
+	} else {
+		_, secretName, secretKeyName := utils.GetAppKeySecret(&dda.Spec.Credentials.DatadogCredentials, utils.GetDefaultCredentialsSecretName(dda))
 		appKey, err = mf.getKeyFromSecret(dda, secretName, secretKeyName)
 		if err != nil {
 			return "", "", err
@@ -596,6 +608,7 @@ func (mf *metricsForwarder) getKeyFromSecret(dda *datadoghqv1alpha1.DatadogAgent
 	if err != nil {
 		return "", err
 	}
+
 	return string(secret.Data[dataKey]), nil
 }
 
@@ -609,12 +622,11 @@ func (mf *metricsForwarder) updateStatusIfNeeded(err error) {
 		description = "Datadog metrics forwarding error"
 	}
 
-	oldStatus := mf.getStatus()
-	if oldStatus == nil {
-		newStatus := condition.NewDatadogAgentStatusCondition(datadoghqv1alpha1.ConditionTypeActiveDatadogMetrics, conditionStatus, now, "", description)
+	if oldStatus := mf.getStatus(); oldStatus == nil {
+		newStatus := condition.NewDatadogAgentStatusCondition(datadoghqv1alpha1.DatadogMetricsActive, conditionStatus, now, "", description)
 		mf.setStatus(&newStatus)
 	} else {
-		mf.setStatus(condition.UpdateDatadogAgentStatusCondition(oldStatus, now, datadoghqv1alpha1.ConditionTypeActiveDatadogMetrics, conditionStatus, description))
+		mf.setStatus(condition.UpdateDatadogAgentStatusCondition(oldStatus, now, datadoghqv1alpha1.DatadogMetricsActive, conditionStatus, description))
 	}
 }
 

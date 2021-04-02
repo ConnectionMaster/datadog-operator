@@ -1,15 +1,13 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadog
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -18,7 +16,8 @@ import (
 
 	datadoghqv1alpha1 "github.com/DataDog/datadog-operator/api/v1alpha1"
 	test "github.com/DataDog/datadog-operator/api/v1alpha1/test"
-	"github.com/DataDog/datadog-operator/pkg/config"
+	"github.com/DataDog/datadog-operator/pkg/secrets"
+
 	"github.com/stretchr/testify/mock"
 	assert "github.com/stretchr/testify/require"
 	api "github.com/zorkian/go-datadog-api"
@@ -435,26 +434,13 @@ func TestMetricsForwarder_updateCredsIfNeeded(t *testing.T) {
 	}
 }
 
-type dummyDecryptor struct {
-	mock.Mock
-}
-
-func (d *dummyDecryptor) Decrypt(secrets []string) (map[string]string, error) {
-	d.Called(secrets)
-	res := map[string]string{}
-	for _, secret := range secrets {
-		res[secret] = fmt.Sprintf("DEC[%s]", secret)
-	}
-	return res, nil
-}
-
-func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
+func TestReconcileDatadogAgent_getCredsFromDatadogAgent(t *testing.T) {
 	type fields struct {
 		client client.Client
 	}
 	type args struct {
 		dda      *datadoghqv1alpha1.DatadogAgent
-		loadFunc func(*metricsForwarder, *dummyDecryptor)
+		loadFunc func(*metricsForwarder, *secrets.DummyDecryptor)
 	}
 	tests := []struct {
 		name       string
@@ -463,7 +449,7 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 		wantAPIKey string
 		wantAPPKey string
 		wantErr    bool
-		wantFunc   func(*metricsForwarder, *dummyDecryptor) error
+		wantFunc   func(*metricsForwarder, *secrets.DummyDecryptor) error
 	}{
 		{
 			name: "creds found in CR",
@@ -474,8 +460,10 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKey: "foundApiKey",
-							AppKey: "foundAppKey",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKey: "foundApiKey",
+								AppKey: "foundAppKey",
+							},
 						}}),
 			},
 			wantAPIKey: "foundApiKey",
@@ -493,7 +481,9 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 					"bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKey: "foundApiKey",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKey: "foundApiKey",
+							},
 						}}),
 			},
 			wantAPIKey: "",
@@ -509,16 +499,18 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APISecret: &datadoghqv1alpha1.Secret{
-								SecretName: "datadog-creds-api",
-								KeyName:    "datadog_api_key",
-							},
-							APPSecret: &datadoghqv1alpha1.Secret{
-								SecretName: "datadog-creds-app",
-								KeyName:    "application_key",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APISecret: &datadoghqv1alpha1.Secret{
+									SecretName: "datadog-creds-api",
+									KeyName:    "datadog_api_key",
+								},
+								APPSecret: &datadoghqv1alpha1.Secret{
+									SecretName: "datadog-creds-app",
+									KeyName:    "application_key",
+								},
 							},
 						}}),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
+				loadFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) {
 					secret := &corev1.Secret{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "datadog-creds-api",
@@ -555,10 +547,12 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKeyExistingSecret: "datadog-creds",
-							AppKeyExistingSecret: "datadog-creds",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKeyExistingSecret: "datadog-creds",
+								AppKeyExistingSecret: "datadog-creds",
+							},
 						}}),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
+				loadFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) {
 					secret := &corev1.Secret{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "datadog-creds",
@@ -585,12 +579,14 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKey: "foundApiKey",
-							APPSecret: &datadoghqv1alpha1.Secret{
-								SecretName: "datadog-creds",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKey: "foundApiKey",
+								APPSecret: &datadoghqv1alpha1.Secret{
+									SecretName: "datadog-creds",
+								},
 							},
 						}}),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
+				loadFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) {
 					secret := &corev1.Secret{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "datadog-creds",
@@ -616,10 +612,12 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKey:               "foundApiKey",
-							AppKeyExistingSecret: "datadog-creds",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKey:               "foundApiKey",
+								AppKeyExistingSecret: "datadog-creds",
+							},
 						}}),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
+				loadFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) {
 					secret := &corev1.Secret{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "datadog-creds",
@@ -637,24 +635,6 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "no creds defined, apiKey and appKey found in env var",
-			fields: fields{
-				client: fake.NewFakeClient(),
-			},
-			args: args{
-				dda: test.NewDefaultedDatadogAgent("foo", "bar",
-					&test.NewDatadogAgentOptions{},
-				),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
-					os.Setenv(config.DDAPIKeyEnvVar, "foundApiKey")
-					os.Setenv(config.DDAppKeyEnvVar, "foundAppKey")
-				},
-			},
-			wantAPIKey: "foundApiKey",
-			wantAPPKey: "foundAppKey",
-			wantErr:    false,
-		},
-		{
 			name: "enc creds found in cache",
 			fields: fields{
 				client: fake.NewFakeClient(),
@@ -663,10 +643,12 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKey: "ENC[ApiKey]",
-							AppKey: "ENC[AppKey]",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKey: "ENC[ApiKey]",
+								AppKey: "ENC[AppKey]",
+							},
 						}}),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
+				loadFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) {
 					m.cleanSecretsCache()
 					m.creds.Store("ENC[ApiKey]", "cachedApiKey")
 					m.creds.Store("ENC[AppKey]", "cachedAppKey")
@@ -675,7 +657,7 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 			wantAPIKey: "cachedApiKey",
 			wantAPPKey: "cachedAppKey",
 			wantErr:    false,
-			wantFunc: func(m *metricsForwarder, d *dummyDecryptor) error {
+			wantFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) error {
 				if !d.AssertNumberOfCalls(t, "Decrypt", 0) {
 					return errors.New("Wrong number of calls")
 				}
@@ -692,10 +674,12 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 				dda: test.NewDefaultedDatadogAgent("foo", "bar",
 					&test.NewDatadogAgentOptions{
 						Creds: &datadoghqv1alpha1.AgentCredentials{
-							APIKey: "ENC[ApiKey]",
-							AppKey: "ENC[AppKey]",
+							DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+								APIKey: "ENC[ApiKey]",
+								AppKey: "ENC[AppKey]",
+							},
 						}}),
-				loadFunc: func(m *metricsForwarder, d *dummyDecryptor) {
+				loadFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) {
 					m.cleanSecretsCache()
 					d.On("Decrypt", []string{"ENC[ApiKey]", "ENC[AppKey]"}).Once()
 				},
@@ -703,7 +687,7 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 			wantAPIKey: "DEC[ENC[ApiKey]]",
 			wantAPPKey: "DEC[ENC[AppKey]]",
 			wantErr:    false,
-			wantFunc: func(m *metricsForwarder, d *dummyDecryptor) error {
+			wantFunc: func(m *metricsForwarder, d *secrets.DummyDecryptor) error {
 				v, found := m.creds.Load("ENC[ApiKey]")
 				assert.True(t, found)
 				assert.Equal(t, "DEC[ENC[ApiKey]]", v)
@@ -719,7 +703,7 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			d := &dummyDecryptor{}
+			d := &secrets.DummyDecryptor{}
 			mf := &metricsForwarder{
 				k8sClient: tt.fields.client,
 				decryptor: d,
@@ -728,20 +712,20 @@ func TestReconcileDatadogAgent_getCredentials(t *testing.T) {
 			if tt.args.loadFunc != nil {
 				tt.args.loadFunc(mf, d)
 			}
-			apiKey, appKey, err := mf.getCredentials(tt.args.dda)
+			apiKey, appKey, err := mf.getCredsFromDatadogAgent(tt.args.dda)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("metricsForwarder.getCredentials() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("metricsForwarder.getCredsFromDatadogAgent() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if apiKey != tt.wantAPIKey {
-				t.Errorf("metricsForwarder.getCredentials() apiKey = %v, want %v", apiKey, tt.wantAPIKey)
+				t.Errorf("metricsForwarder.getCredsFromDatadogAgent() apiKey = %v, want %v", apiKey, tt.wantAPIKey)
 			}
 			if appKey != tt.wantAPPKey {
-				t.Errorf("metricsForwarder.getCredentials() appKey = %v, want %v", appKey, tt.wantAPPKey)
+				t.Errorf("metricsForwarder.getCredsFromDatadogAgent() appKey = %v, want %v", appKey, tt.wantAPPKey)
 			}
 			if tt.wantFunc != nil {
 				if err := tt.wantFunc(mf, d); err != nil {
-					t.Errorf("metricsForwarder.getCredentials() wantFunc validation error: %v", err)
+					t.Errorf("metricsForwarder.getCredsFromDatadogAgent() wantFunc validation error: %v", err)
 				}
 			}
 		})

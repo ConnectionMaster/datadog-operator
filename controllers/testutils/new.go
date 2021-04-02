@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package testutils
 
@@ -21,11 +21,12 @@ type NewDatadogAgentOptions struct {
 	UseEDS              bool
 	APIKey              string
 	AppKey              string
+	CustomConfig        *datadoghqv1alpha1.CustomConfigSpec
+	SecuritySpec        *datadoghqv1alpha1.SecuritySpec
+	VolumeMounts        []v1.VolumeMount
 }
 
-var (
-	pullPolicy = v1.PullIfNotPresent
-)
+var pullPolicy = v1.PullIfNotPresent
 
 // NewDatadogAgent returns new DatadogAgent instance with is config hash
 func NewDatadogAgent(ns, name, image string, options *NewDatadogAgentOptions) *datadoghqv1alpha1.DatadogAgent {
@@ -35,10 +36,13 @@ func NewDatadogAgent(ns, name, image string, options *NewDatadogAgentOptions) *d
 			Namespace: ns,
 		},
 	}
+
 	ad.Spec = datadoghqv1alpha1.DatadogAgentSpec{
 		Credentials: datadoghqv1alpha1.AgentCredentials{
-			APIKey: "",
-			AppKey: "",
+			DatadogCredentials: datadoghqv1alpha1.DatadogCredentials{
+				APIKey: "",
+				AppKey: "",
+			},
 		},
 		Agent: &datadoghqv1alpha1.DatadogAgentSpecAgentSpec{
 			Image: datadoghqv1alpha1.ImageConfig{},
@@ -117,6 +121,20 @@ func NewDatadogAgent(ns, name, image string, options *NewDatadogAgentOptions) *d
 					PullSecrets: &[]v1.LocalObjectReference{},
 				},
 			}
+		}
+
+		ad.Spec.Agent.Config.VolumeMounts = options.VolumeMounts
+		ad.Spec.Agent.Process.VolumeMounts = options.VolumeMounts
+		ad.Spec.Agent.Apm.VolumeMounts = options.VolumeMounts
+
+		if options.CustomConfig != nil {
+			ad.Spec.Agent.CustomConfig = options.CustomConfig
+		}
+
+		if options.SecuritySpec != nil {
+			ad.Spec.Agent.Security = *options.SecuritySpec
+		} else {
+			ad.Spec.Agent.Security.VolumeMounts = options.VolumeMounts
 		}
 	}
 

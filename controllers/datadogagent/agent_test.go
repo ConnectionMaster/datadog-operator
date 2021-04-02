@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadogagent
 
@@ -21,11 +21,14 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-const testDdaName = "foo"
-const agentConfigFile = "/etc/datadog-agent/datadog.yaml"
+const (
+	testDdaName     = "foo"
+	agentConfigFile = "/etc/datadog-agent/datadog.yaml"
+)
 
 func apiKeyValue() *corev1.EnvVarSource {
 	return &corev1.EnvVarSource{
@@ -116,6 +119,12 @@ func defaultReadinessProbe() *corev1.Probe {
 func defaultVolumes() []corev1.Volume {
 	return []corev1.Volume{
 		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -172,6 +181,12 @@ func defaultVolumes() []corev1.Volume {
 
 func defaultSystemProbeVolumes() []corev1.Volume {
 	return []corev1.Volume{
+		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
 		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -272,6 +287,12 @@ func defaultSystemProbeVolumes() []corev1.Volume {
 func complianceSecurityAgentVolumes() []corev1.Volume {
 	return []corev1.Volume{
 		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -352,6 +373,12 @@ func complianceSecurityAgentVolumes() []corev1.Volume {
 
 func runtimeSecurityAgentVolumes() []corev1.Volume {
 	return []corev1.Volume{
+		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
 		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -452,6 +479,10 @@ func runtimeSecurityAgentVolumes() []corev1.Volume {
 func defaultMountVolume() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{
+			Name:      "logdatadog",
+			MountPath: "/var/log/datadog",
+		},
+		{
 			Name:      "installinfo",
 			SubPath:   "install_info",
 			MountPath: "/etc/datadog-agent/install_info",
@@ -492,6 +523,10 @@ func defaultMountVolume() []corev1.VolumeMount {
 func defaultProcessMountVolumes() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{
+			Name:      "logdatadog",
+			MountPath: "/var/log/datadog",
+		},
+		{
 			Name:      "cgroups",
 			MountPath: "/host/sys/fs/cgroup",
 			ReadOnly:  true,
@@ -522,6 +557,10 @@ func defaultProcessMountVolumes() []corev1.VolumeMount {
 func defaultSystemProbeMountVolume() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{
+			Name:      "logdatadog",
+			MountPath: "/var/log/datadog",
+		},
+		{
 			Name:      "debugfs",
 			MountPath: "/sys/kernel/debug",
 		},
@@ -544,6 +583,10 @@ func defaultSystemProbeMountVolume() []corev1.VolumeMount {
 
 func complianceSecurityAgentMountVolume() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
+		{
+			Name:      "logdatadog",
+			MountPath: "/var/log/datadog",
+		},
 		{
 			Name:      "config",
 			MountPath: "/etc/datadog-agent",
@@ -589,6 +632,10 @@ func complianceSecurityAgentMountVolume() []corev1.VolumeMount {
 func runtimeSecurityAgentMountVolume() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{
+			Name:      "logdatadog",
+			MountPath: "/var/log/datadog",
+		},
+		{
 			Name:      "config",
 			MountPath: "/etc/datadog-agent",
 		},
@@ -607,10 +654,6 @@ func runtimeSecurityAgentMountVolume() []corev1.VolumeMount {
 
 func defaultEnvVars(extraEnv map[string]string) []corev1.EnvVar {
 	envs := []corev1.EnvVar{
-		{
-			Name:  "DD_CLUSTER_NAME",
-			Value: "",
-		},
 		{
 			Name:  "DD_HEALTH_PORT",
 			Value: "5555",
@@ -871,7 +914,7 @@ func defaultPodSpec() corev1.PodSpec {
 		InitContainers: []corev1.Container{
 			{
 				Name:            "init-volume",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -885,7 +928,7 @@ func defaultPodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "init-config",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -897,7 +940,7 @@ func defaultPodSpec() corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"agent",
@@ -924,13 +967,17 @@ func defaultPodSpec() corev1.PodSpec {
 func appendDefaultAPMAgentContainer(podSpec *corev1.PodSpec) {
 	apmContainer := corev1.Container{
 		Name:            "trace-agent",
-		Image:           "datadog/agent:latest",
+		Image:           "gcr.io/datadoghq/agent:latest",
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         []string{"trace-agent", "--config=" + agentConfigFile},
 		Resources:       corev1.ResourceRequirements{},
 		Ports:           []corev1.ContainerPort{{Name: "traceport", ContainerPort: 8126, Protocol: "TCP"}},
 		Env:             defaultAPMContainerEnvVars(),
 		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "logdatadog",
+				MountPath: "/var/log/datadog",
+			},
 			{
 				Name:      "config",
 				MountPath: "/etc/datadog-agent",
@@ -967,7 +1014,7 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 		InitContainers: []corev1.Container{
 			{
 				Name:            "init-volume",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -981,7 +1028,7 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "init-config",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -991,7 +1038,7 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "seccomp-setup",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"cp", "/etc/config/system-probe-seccomp.json", "/host/var/lib/kubelet/seccomp/system-probe"},
@@ -1010,7 +1057,7 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"agent",
@@ -1031,7 +1078,7 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "system-probe",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"/opt/datadog-agent/embedded/bin/system-probe",
@@ -1039,7 +1086,7 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 				},
 				SecurityContext: &corev1.SecurityContext{
 					Capabilities: &corev1.Capabilities{
-						Add: []corev1.Capability{"SYS_ADMIN", "SYS_RESOURCE", "SYS_PTRACE", "NET_ADMIN", "NET_BROADCAST", "IPC_LOCK"},
+						Add: []corev1.Capability{"SYS_ADMIN", "SYS_RESOURCE", "SYS_PTRACE", "NET_ADMIN", "NET_BROADCAST", "NET_RAW", "IPC_LOCK"},
 					},
 				},
 				Resources:    corev1.ResourceRequirements{},
@@ -1051,14 +1098,13 @@ func defaultSystemProbePodSpec() corev1.PodSpec {
 	}
 }
 
-func defaultOrchestratorPodSpec() corev1.PodSpec {
-
+func defaultOrchestratorPodSpec(dda *datadoghqv1alpha1.DatadogAgent) corev1.PodSpec {
 	return corev1.PodSpec{
 		ServiceAccountName: "foo-agent",
 		InitContainers: []corev1.Container{
 			{
 				Name:            "init-volume",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -1072,7 +1118,7 @@ func defaultOrchestratorPodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "init-config",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -1084,7 +1130,7 @@ func defaultOrchestratorPodSpec() corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"agent",
@@ -1105,14 +1151,14 @@ func defaultOrchestratorPodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "process-agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"process-agent",
 					"-config=/etc/datadog-agent/datadog.yaml",
 				},
 				Resources:    corev1.ResourceRequirements{},
-				Env:          defaultOrchestratorEnvVars(),
+				Env:          defaultOrchestratorEnvVars(dda),
 				VolumeMounts: defaultProcessMountVolumes(),
 			},
 		},
@@ -1122,6 +1168,12 @@ func defaultOrchestratorPodSpec() corev1.PodSpec {
 
 func defaultProcessMount() []corev1.Volume {
 	return []corev1.Volume{
+		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
 		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -1185,7 +1237,7 @@ func defaultProcessMount() []corev1.Volume {
 	}
 }
 
-func defaultOrchestratorEnvVars() []corev1.EnvVar {
+func defaultOrchestratorEnvVars(dda *datadoghqv1alpha1.DatadogAgent) []corev1.EnvVar {
 
 	newVars := []corev1.EnvVar{
 		{
@@ -1227,6 +1279,7 @@ func defaultOrchestratorEnvVars() []corev1.EnvVar {
 	}
 	orchestratorEnvs, _ := orchestrator.EnvVars(&explorerConfig)
 	newVars = append(newVars, orchestratorEnvs...)
+	newVars = append(newVars, envForClusterAgentConnection(dda)...)
 
 	return append(newVars, vars...)
 }
@@ -1238,7 +1291,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 		InitContainers: []corev1.Container{
 			{
 				Name:            "init-volume",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -1252,7 +1305,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 			},
 			{
 				Name:            "init-config",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -1262,7 +1315,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 			},
 			{
 				Name:            "seccomp-setup",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"cp", "/etc/config/system-probe-seccomp.json", "/host/var/lib/kubelet/seccomp/system-probe"},
@@ -1281,7 +1334,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"agent",
@@ -1302,7 +1355,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 			},
 			{
 				Name:            "system-probe",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"/opt/datadog-agent/embedded/bin/system-probe",
@@ -1310,7 +1363,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 				},
 				SecurityContext: &corev1.SecurityContext{
 					Capabilities: &corev1.Capabilities{
-						Add: []corev1.Capability{"SYS_ADMIN", "SYS_RESOURCE", "SYS_PTRACE", "NET_ADMIN", "NET_BROADCAST", "IPC_LOCK"},
+						Add: []corev1.Capability{"SYS_ADMIN", "SYS_RESOURCE", "SYS_PTRACE", "NET_ADMIN", "NET_BROADCAST", "NET_RAW", "IPC_LOCK"},
 					},
 				},
 				Resources:    corev1.ResourceRequirements{},
@@ -1319,7 +1372,7 @@ func runtimeSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 			},
 			{
 				Name:            "security-agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"security-agent",
@@ -1347,7 +1400,7 @@ func complianceSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 		InitContainers: []corev1.Container{
 			{
 				Name:            "init-volume",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -1361,7 +1414,7 @@ func complianceSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 			},
 			{
 				Name:            "init-config",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -1373,7 +1426,7 @@ func complianceSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"agent",
@@ -1394,7 +1447,7 @@ func complianceSecurityAgentPodSpec(extraEnv map[string]string) corev1.PodSpec {
 			},
 			{
 				Name:            "security-agent",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command: []string{
 					"security-agent",
@@ -1425,8 +1478,9 @@ type extendedDaemonSetFromInstanceTest struct {
 
 func (test extendedDaemonSetFromInstanceTest) Run(t *testing.T) {
 	t.Helper()
-	logf.SetLogger(logf.ZapLogger(true))
-	got, _, err := newExtendedDaemonSetFromInstance(test.agentdeployment, test.selector)
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
+	logger := logf.Log.WithName(t.Name())
+	got, _, err := newExtendedDaemonSetFromInstance(logger, test.agentdeployment, test.selector)
 	if test.wantErr {
 		assert.Error(t, err, "newExtendedDaemonSetFromInstance() expected an error")
 	} else {
@@ -1657,6 +1711,12 @@ func Test_newExtendedDaemonSetFromInstance_CustomConfigMaps(t *testing.T) {
 	customConfigMapsPodSpec := defaultPodSpec()
 	customConfigMapsPodSpec.Volumes = []corev1.Volume{
 		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -1781,6 +1841,12 @@ func Test_newExtendedDaemonSetFromInstance_CustomDatadogYaml(t *testing.T) {
 
 	customConfigMapCustomDatadogYamlSpec.Volumes = []corev1.Volume{
 		{
+			Name: datadoghqv1alpha1.LogDatadogVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
 			Name: datadoghqv1alpha1.InstallInfoVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
@@ -1844,6 +1910,10 @@ func Test_newExtendedDaemonSetFromInstance_CustomDatadogYaml(t *testing.T) {
 		},
 	}
 	customConfigMapCustomDatadogYamlSpec.Containers[0].VolumeMounts = []corev1.VolumeMount{
+		{
+			Name:      "logdatadog",
+			MountPath: "/var/log/datadog",
+		},
 		{
 			Name:      "installinfo",
 			SubPath:   "install_info",
@@ -2544,13 +2614,13 @@ func Test_newExtendedDaemonSetFromInstance_SystemProbe(t *testing.T) {
 }
 
 func Test_newExtendedDaemonSetFromInstance_Orchestrator(t *testing.T) {
-	orchestratorPodSpec := defaultOrchestratorPodSpec()
-
 	dda := test.NewDefaultedDatadogAgent("bar", "foo", &test.NewDatadogAgentOptions{
 		UseEDS:                      true,
 		ClusterAgentEnabled:         true,
 		OrchestratorExplorerEnabled: true,
 	})
+
+	orchestratorPodSpec := defaultOrchestratorPodSpec(dda)
 
 	tests := []extendedDaemonSetFromInstanceTest{
 		{
@@ -2558,6 +2628,70 @@ func Test_newExtendedDaemonSetFromInstance_Orchestrator(t *testing.T) {
 			agentdeployment: dda,
 			wantErr:         false,
 			want:            extendedDaemonSetDefault(orchestratorPodSpec),
+		},
+	}
+
+	for _, instanceTest := range tests {
+		t.Run(instanceTest.name, func(t *testing.T) {
+			instanceTest.Run(t)
+		})
+	}
+}
+
+func Test_newExtendedDaemonSetFromInstance_PrometheusScrape(t *testing.T) {
+	dda := test.NewDefaultedDatadogAgent("bar", "foo", &test.NewDatadogAgentOptions{
+		UseEDS:              true,
+		ClusterAgentEnabled: true,
+		Features: &datadoghqv1alpha1.DatadogFeatures{
+			OrchestratorExplorer: &datadoghqv1alpha1.OrchestratorExplorerConfig{Enabled: datadoghqv1alpha1.NewBoolPointer(false)}, // Do not add the process agent container in this test case for simplicity
+			PrometheusScrape: &datadoghqv1alpha1.PrometheusScrapeConfig{
+				Enabled:          datadoghqv1alpha1.NewBoolPointer(true),
+				ServiceEndpoints: datadoghqv1alpha1.NewBoolPointer(true),
+			},
+		},
+	})
+
+	promEnabledPodSpec := defaultPodSpec()
+	logger := logf.Log.WithName(t.Name())
+	promEnabledPodSpec.Containers[0].Env = append(promEnabledPodSpec.Containers[0].Env, prometheusScrapeEnvVars(logger, dda)...)
+	promEnabledPodSpec.InitContainers[1].Env = append(promEnabledPodSpec.InitContainers[1].Env, prometheusScrapeEnvVars(logger, dda)...)
+
+	additionalConfig := `- configurations:
+  - timeout: 5
+    send_distribution_buckets: true
+  autodiscovery:
+    kubernetes_annotations:
+      include:
+        custom_label: true`
+	ddaWithAdditionalConf := test.NewDefaultedDatadogAgent("bar", "foo", &test.NewDatadogAgentOptions{
+		UseEDS:              true,
+		ClusterAgentEnabled: true,
+		Features: &datadoghqv1alpha1.DatadogFeatures{
+			OrchestratorExplorer: &datadoghqv1alpha1.OrchestratorExplorerConfig{Enabled: datadoghqv1alpha1.NewBoolPointer(false)},
+			PrometheusScrape: &datadoghqv1alpha1.PrometheusScrapeConfig{
+				Enabled:           datadoghqv1alpha1.NewBoolPointer(true),
+				ServiceEndpoints:  datadoghqv1alpha1.NewBoolPointer(false),
+				AdditionalConfigs: &additionalConfig,
+			},
+		},
+	})
+
+	promAdditionalConfPodSpec := defaultPodSpec()
+	promAdditionalConfPodSpec.Containers[0].Env = append(promAdditionalConfPodSpec.Containers[0].Env, prometheusScrapeEnvVars(logger, ddaWithAdditionalConf)...)
+	promAdditionalConfPodSpec.InitContainers[1].Env = append(promAdditionalConfPodSpec.InitContainers[1].Env, prometheusScrapeEnvVars(logger, ddaWithAdditionalConf)...)
+
+	tests := []extendedDaemonSetFromInstanceTest{
+		{
+			name:            "Prometheus scrape enabled",
+			agentdeployment: dda,
+			wantErr:         false,
+			want:            extendedDaemonSetDefault(promEnabledPodSpec),
+		},
+		{
+			name:            "With additional config",
+			agentdeployment: ddaWithAdditionalConf,
+			wantErr:         false,
+			want:            extendedDaemonSetDefault(promAdditionalConfPodSpec),
 		},
 	}
 

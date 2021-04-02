@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package main
 
@@ -17,6 +17,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+	klog "k8s.io/klog/v2"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlzap "sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -29,7 +30,6 @@ import (
 	"github.com/DataDog/datadog-operator/controllers"
 	"github.com/DataDog/datadog-operator/pkg/config"
 	"github.com/DataDog/datadog-operator/pkg/controller/debug"
-	"github.com/DataDog/datadog-operator/pkg/klog"
 	"github.com/DataDog/datadog-operator/pkg/secrets"
 	"github.com/DataDog/datadog-operator/pkg/version"
 
@@ -48,7 +48,7 @@ var (
 )
 
 func init() {
-	klog.Configure(ctrl.Log.WithName("klog"))
+	klog.SetLogger(ctrl.Log.WithName("klog"))
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(apiregistrationv1.AddToScheme(scheme))
@@ -78,7 +78,7 @@ func main() {
 		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
 
 	// Custom flags
-	var printVersion, pprofActive, supportExtendedDaemonset bool
+	var printVersion, pprofActive, supportExtendedDaemonset, datadogMonitorEnabled, operatorMetricsEnabled bool
 	var logEncoder, secretBackendCommand string
 	var secretBackendArgs stringSlice
 	flag.StringVar(&logEncoder, "logEncoder", "json", "log encoding ('json' or 'console')")
@@ -88,13 +88,15 @@ func main() {
 	flag.BoolVar(&printVersion, "version", false, "Print version and exit")
 	flag.BoolVar(&pprofActive, "pprof", false, "Enable pprof endpoint")
 	flag.BoolVar(&supportExtendedDaemonset, "supportExtendedDaemonset", false, "Support usage of Datadog ExtendedDaemonset CRD.")
+	flag.BoolVar(&datadogMonitorEnabled, "datadogMonitorEnabled", false, "Enable the DatadogMonitor controller")
+	flag.BoolVar(&operatorMetricsEnabled, "operatorMetricsEnabled", true, "Enable sending operator metrics to Datadog")
 
 	// Parsing flags
 	flag.Parse()
 
 	// Logging setup
 	if err := customSetupLogging(*logLevel, logEncoder); err != nil {
-		setupLog.Error(err, "unable to setup the logger")
+		setupLog.Error(err, "Unable to setup the logger")
 		os.Exit(1)
 	}
 
@@ -118,7 +120,7 @@ func main() {
 		LeaderElectionID:       "datadog-operator-lock",
 	}))
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		setupLog.Error(err, "Unable to start manager")
 		os.Exit(1)
 	}
 
@@ -126,25 +128,30 @@ func main() {
 	customSetupHealthChecks(mgr)
 	customSetupEndpoints(pprofActive, mgr)
 
-	// Get some information about Kubernetes version
-	if err := controllers.SetupControllers(mgr, supportExtendedDaemonset); err != nil {
-		setupLog.Error(err, "unable to start controllers")
+	creds, err := config.NewCredentialManager().GetCredentials()
+	if err != nil && datadogMonitorEnabled {
+		setupLog.Error(err, "Unable to get credentials")
 		os.Exit(1)
 	}
 
-	// if err = (&controllers.DatadogMonitorReconciler{
-	// 	Client: mgr.GetClient(),
-	// 	Log:    ctrl.Log.WithName("controllers").WithName("DatadogMonitor"),
-	// 	Scheme: mgr.GetScheme(),
-	// }).SetupWithManager(mgr); err != nil {
-	// 	setupLog.Error(err, "unable to create controller", "controller", "DatadogMonitor")
-	// 	os.Exit(1)
-	// }
+	options := controllers.SetupOptions{
+		SupportExtendedDaemonset: supportExtendedDaemonset,
+		Creds:                    creds,
+		DatadogMonitorEnabled:    datadogMonitorEnabled,
+		OperatorMetricsEnabled:   operatorMetricsEnabled,
+	}
+
+	// Get some information about Kubernetes version
+	if err := controllers.SetupControllers(setupLog, mgr, options); err != nil {
+		setupLog.Error(err, "Unable to start controllers")
+		os.Exit(1)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		setupLog.Error(err, "Problem running manager")
 		os.Exit(1)
 	}
 }
@@ -180,7 +187,6 @@ func customSetupHealthChecks(mgr manager.Manager) {
 		}
 		return nil
 	})
-
 	if err != nil {
 		setupLog.Error(err, "Unable to add healthchecks")
 	}

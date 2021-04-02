@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package comparison
 
@@ -28,6 +28,7 @@ func IsSameMD5Hash(hash string, annotations map[string]string, annotationKey str
 	if val, ok := annotations[annotationKey]; ok && val == hash {
 		return true
 	}
+
 	return false
 }
 
@@ -43,6 +44,7 @@ func GenerateMD5ForSpec(spec interface{}) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -55,12 +57,13 @@ func SetMD5DatadogAgentGenerationAnnotation(obj *metav1.ObjectMeta, spec interfa
 func SetMD5GenerationAnnotation(obj *metav1.ObjectMeta, spec interface{}, annotationKey string) (string, error) {
 	hash, err := GenerateMD5ForSpec(spec)
 	if err != nil {
-		return "", fmt.Errorf("unable to generate the spec MD5, %v", err)
+		return "", fmt.Errorf("unable to generate the spec MD5, %w", err)
 	}
 
 	if obj.Annotations == nil {
 		obj.SetAnnotations(map[string]string{})
 	}
 	obj.Annotations[annotationKey] = hash
+
 	return hash, nil
 }

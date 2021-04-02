@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package test
 
@@ -11,7 +11,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	datadoghqv1alpha1 "github.com/DataDog/datadog-operator/api/v1alpha1"
@@ -23,7 +22,7 @@ import (
 var (
 	// apiVersion datadoghqv1alpha1 api version
 	apiVersion = fmt.Sprintf("%s/%s", datadoghqv1alpha1.GroupVersion.Group, datadoghqv1alpha1.GroupVersion.Version)
-	pullPolicy = v1.PullIfNotPresent
+	pullPolicy = corev1.PullIfNotPresent
 )
 
 // NewDatadogAgentOptions set of option for the DatadogAgent creation
@@ -38,6 +37,7 @@ type NewDatadogAgentOptions struct {
 	MetricsServerEndpoint            string
 	MetricsServerUseDatadogMetric    bool
 	MetricsServerWPAController       bool
+	MetricsServerCredentials         *datadoghqv1alpha1.DatadogCredentials
 	ClusterChecksEnabled             bool
 	KubeStateMetricsCore             *datadoghqv1alpha1.KubeStateMetricsCore
 	NodeAgentConfig                  *datadoghqv1alpha1.NodeAgentConfig
@@ -84,6 +84,7 @@ type NewDatadogAgentOptions struct {
 	CreateNetworkPolicy              bool
 	AgentSpecAdditionalLabels        map[string]string
 	AgentSpecAdditionalAnnotations   map[string]string
+	Features                         *datadoghqv1alpha1.DatadogFeatures
 }
 
 // NewDefaultedDatadogAgent returns an initialized and defaulted DatadogAgent for testing purpose
@@ -104,7 +105,7 @@ func NewDefaultedDatadogAgent(ns, name string, options *NewDatadogAgentOptions) 
 		Credentials: datadoghqv1alpha1.AgentCredentials{Token: "token-foo"},
 		Agent: &datadoghqv1alpha1.DatadogAgentSpecAgentSpec{
 			Image: datadoghqv1alpha1.ImageConfig{
-				Name:       "datadog/agent:latest",
+				Name:       "gcr.io/datadoghq/agent:latest",
 				PullPolicy: &pullPolicy,
 			},
 			Config:             datadoghqv1alpha1.NodeAgentConfig{},
@@ -117,12 +118,16 @@ func NewDefaultedDatadogAgent(ns, name string, options *NewDatadogAgentOptions) 
 			},
 		},
 	}
-	if options != nil {
 
+	if options != nil {
 		if options.OrchestratorExplorerEnabled {
 			orExplorer := datadoghqv1alpha1.OrchestratorExplorerConfig{Enabled: datadoghqv1alpha1.NewBoolPointer(true)}
 			ad.Spec.Features = &datadoghqv1alpha1.DatadogFeatures{OrchestratorExplorer: &orExplorer}
 			ad.Spec.Agent.Process.Enabled = datadoghqv1alpha1.NewBoolPointer(true)
+		}
+
+		if options.Features != nil {
+			ad.Spec.Features = options.Features
 		}
 
 		if options.UseEDS {
@@ -167,6 +172,9 @@ func NewDefaultedDatadogAgent(ns, name string, options *NewDatadogAgentOptions) 
 		}
 		if len(options.VolumeMounts) != 0 {
 			ad.Spec.Agent.Config.VolumeMounts = options.VolumeMounts
+			ad.Spec.Agent.Process.VolumeMounts = options.VolumeMounts
+			ad.Spec.Agent.Apm.VolumeMounts = options.VolumeMounts
+			ad.Spec.Agent.Security.VolumeMounts = options.VolumeMounts
 		}
 		if options.ClusterAgentEnabled {
 			ad.Spec.ClusterAgent = &datadoghqv1alpha1.DatadogAgentSpecClusterAgentSpec{
@@ -193,6 +201,10 @@ func NewDefaultedDatadogAgent(ns, name string, options *NewDatadogAgentOptions) 
 
 				if options.MetricsServerEndpoint != "" {
 					externalMetricsConfig.Endpoint = &options.MetricsServerEndpoint
+				}
+
+				if options.MetricsServerCredentials != nil {
+					externalMetricsConfig.Credentials = options.MetricsServerCredentials
 				}
 
 				ad.Spec.ClusterAgent.Config.ExternalMetrics = &externalMetricsConfig
@@ -266,7 +278,6 @@ func NewDefaultedDatadogAgent(ns, name string, options *NewDatadogAgentOptions) 
 		if options.ProcessCollectionEnabled {
 			ad.Spec.Agent.Process.Enabled = datadoghqv1alpha1.NewBoolPointer(true)
 			ad.Spec.Agent.Process.ProcessCollectionEnabled = datadoghqv1alpha1.NewBoolPointer(true)
-
 		}
 
 		if options.HostNetwork {
@@ -346,6 +357,7 @@ func NewDefaultedDatadogAgent(ns, name string, options *NewDatadogAgentOptions) 
 			}
 		}
 	}
+
 	return datadoghqv1alpha1.DefaultDatadogAgent(ad)
 }
 

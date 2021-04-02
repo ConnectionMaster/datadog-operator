@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package controllers
 
@@ -15,8 +15,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	datadoghqv1alpha1 "github.com/DataDog/datadog-operator/api/v1alpha1"
 	"github.com/DataDog/datadog-operator/controllers/testutils"
@@ -31,7 +31,7 @@ const (
 	checksdConfigMapName = "checksd-config"
 )
 
-func getObjectAndCheck(obj runtime.Object, key types.NamespacedName, check func() bool) {
+func getObjectAndCheck(obj client.Object, key types.NamespacedName, check func() bool) {
 	Eventually(func() bool {
 		err := k8sClient.Get(context.Background(), key, obj)
 		if err != nil {
@@ -43,7 +43,7 @@ func getObjectAndCheck(obj runtime.Object, key types.NamespacedName, check func(
 	}, timeout, interval).Should(BeTrue())
 }
 
-func checkAgentUpdateOnObject(agentKey, objKey types.NamespacedName, obj runtime.Object,
+func checkAgentUpdateOnObject(agentKey, objKey types.NamespacedName, obj client.Object,
 	getAgentHash func(agent *datadoghqv1alpha1.DatadogAgent) string,
 	getAnnotationHash func() string,
 	updateAgent func(agent *datadoghqv1alpha1.DatadogAgent),
@@ -138,7 +138,7 @@ var _ = Describe("DatadogAgent Controller", func() {
 					return false
 				}
 				for _, condition := range agent.Status.Conditions {
-					if condition.Type == datadoghqv1alpha1.ConditionTypeActive && condition.Status == corev1.ConditionTrue {
+					if condition.Type == datadoghqv1alpha1.DatadogAgentConditionTypeActive && condition.Status == corev1.ConditionTrue {
 						return true
 					}
 				}

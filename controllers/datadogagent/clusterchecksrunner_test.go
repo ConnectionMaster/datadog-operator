@@ -15,10 +15,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-var testClusterChecksRunnerReplicas int32 = 2
+var testClusterChecksRunnerReplicas int32 = 1
 
 func clusterChecksRunnerDefaultPodSpec() corev1.PodSpec {
 	return corev1.PodSpec{
@@ -27,7 +28,7 @@ func clusterChecksRunnerDefaultPodSpec() corev1.PodSpec {
 		InitContainers: []corev1.Container{
 			{
 				Name:            "init-volume",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -41,7 +42,7 @@ func clusterChecksRunnerDefaultPodSpec() corev1.PodSpec {
 			},
 			{
 				Name:            "init-config",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Command:         []string{"bash", "-c"},
@@ -53,7 +54,7 @@ func clusterChecksRunnerDefaultPodSpec() corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "cluster-checks-runner",
-				Image:           "datadog/agent:latest",
+				Image:           "gcr.io/datadoghq/agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Env:             clusterChecksRunnerDefaultEnvVars(),
@@ -208,7 +209,7 @@ type clusterChecksRunnerDeploymentFromInstanceTest struct {
 
 func (test clusterChecksRunnerDeploymentFromInstanceTest) Run(t *testing.T) {
 	t.Helper()
-	logf.SetLogger(logf.ZapLogger(true))
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 	got, _, err := newClusterChecksRunnerDeploymentFromInstance(test.agentdeployment, test.selector)
 	if test.wantErr {
 		assert.Error(t, err, "newClusterChecksRunnerDeploymentFromInstance() expected an error")

@@ -1,18 +1,18 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package controllers
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
@@ -26,15 +26,18 @@ import (
 
 	datadoghqv1alpha1 "github.com/DataDog/datadog-operator/api/v1alpha1"
 	"github.com/DataDog/datadog-operator/controllers/testutils"
+	"github.com/DataDog/datadog-operator/pkg/config"
 	// +kubebuilder:scaffold:imports
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+var (
+	cfg       *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+)
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -45,15 +48,15 @@ func TestAPIs(t *testing.T) {
 }
 
 var _ = BeforeSuite(func(done Done) {
-	logf.SetLogger(zap.LoggerTo(GinkgoWriter, true))
+	logger := zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true))
+	logf.SetLogger(logger)
 	var err error
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "config", "crd", "bases", "v1")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases", "v1")},
+		ErrorIfCRDPathMissing: true,
 	}
-	// Not present in envtest.Environment
-	err = os.Setenv("KUBEBUILDER_ASSETS", filepath.Join("..", "bin", "kubebuilder"))
 	Expect(err).ToNot(HaveOccurred())
 
 	cfg, err = testEnv.Start()
@@ -83,7 +86,13 @@ var _ = BeforeSuite(func(done Done) {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	err = SetupControllers(mgr, false)
+	options := SetupOptions{
+		SupportExtendedDaemonset: false,
+		Creds:                    config.Creds{APIKey: "dummy_api_key", AppKey: "dummy_app_key"},
+		DatadogMonitorEnabled:    true,
+	}
+
+	err = SetupControllers(logger, mgr, options)
 	Expect(err).ToNot(HaveOccurred())
 
 	go func() {

@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadogagent
 
@@ -32,25 +32,31 @@ func (r *Reconciler) manageClusterChecksRunnerRBACs(logger logr.Logger, dda *dat
 
 	rbacResourcesName := getClusterChecksRunnerRbacResourcesName(dda)
 	clusterChecksRunnerVersion := getClusterChecksRunnerVersion(dda)
+	agentVersion := getAgentVersion(dda)
 
 	// Create ClusterRoleBinding
+	serviceAccountName := getClusterChecksRunnerServiceAccount(dda)
+	roleName := getAgentRbacResourcesName(dda)
 	clusterRoleBinding := &rbacv1.ClusterRoleBinding{}
 	if err := r.client.Get(context.TODO(), types.NamespacedName{Name: rbacResourcesName}, clusterRoleBinding); err != nil {
 		if errors.IsNotFound(err) {
 			return r.createClusterRoleBinding(logger, dda, roleBindingInfo{
 				name:               rbacResourcesName,
-				roleName:           getAgentRbacResourcesName(dda),
-				serviceAccountName: getClusterChecksRunnerServiceAccount(dda),
+				roleName:           roleName,
+				serviceAccountName: serviceAccountName,
 			}, clusterChecksRunnerVersion)
 		}
 		return reconcile.Result{}, err
 	}
+	if result, err := r.udpateIfNeededAgentClusterRoleBinding(logger, dda, rbacResourcesName, roleName, serviceAccountName, agentVersion, clusterRoleBinding); err != nil {
+		return result, err
+	}
 
 	// Create ServiceAccount
 	serviceAccount := &corev1.ServiceAccount{}
-	if err := r.client.Get(context.TODO(), types.NamespacedName{Name: rbacResourcesName, Namespace: dda.Namespace}, serviceAccount); err != nil {
+	if err := r.client.Get(context.TODO(), types.NamespacedName{Name: serviceAccountName, Namespace: dda.Namespace}, serviceAccount); err != nil {
 		if errors.IsNotFound(err) {
-			return r.createServiceAccount(logger, dda, rbacResourcesName, clusterChecksRunnerVersion)
+			return r.createServiceAccount(logger, dda, serviceAccountName, clusterChecksRunnerVersion)
 		}
 		return reconcile.Result{}, err
 	}
@@ -64,18 +70,24 @@ func (r *Reconciler) manageClusterChecksRunnerRBACs(logger logr.Logger, dda *dat
 			return reconcile.Result{}, err
 		}
 
+		if result, err := r.updateIfNeededKubeStateMetricsClusterRole(logger, dda, kubeStateMetricsRBACName, clusterChecksRunnerVersion, kubeStateMetricsClusterRole); err != nil {
+			return result, err
+		}
+
 		kubeStateMetricsClusterRoleBinding := &rbacv1.ClusterRoleBinding{}
 		if err := r.client.Get(context.TODO(), types.NamespacedName{Name: kubeStateMetricsRBACName}, kubeStateMetricsClusterRoleBinding); err != nil {
 			if errors.IsNotFound(err) {
 				return r.createClusterRoleBinding(logger, dda, roleBindingInfo{
 					name:               kubeStateMetricsRBACName,
 					roleName:           kubeStateMetricsRBACName,
-					serviceAccountName: serviceAccount.Name,
+					serviceAccountName: serviceAccountName,
 				}, clusterChecksRunnerVersion)
 			}
 			return reconcile.Result{}, err
 		}
-		return r.updateIfNeededKubeStateMetricsClusterRoleBinding(logger, dda, kubeStateMetricsRBACName, serviceAccount.Name, clusterChecksRunnerVersion, kubeStateMetricsClusterRoleBinding)
+		if result, err := r.updateIfNeededKubeStateMetricsClusterRoleBinding(logger, dda, kubeStateMetricsRBACName, kubeStateMetricsRBACName, serviceAccount.Name, clusterChecksRunnerVersion, kubeStateMetricsClusterRoleBinding); err != nil {
+			return result, err
+		}
 	}
 	return reconcile.Result{}, nil
 }
@@ -97,15 +109,15 @@ func (r *Reconciler) cleanupClusterChecksRunnerRbacResources(logger logr.Logger,
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) updateIfNeededKubeStateMetricsClusterRoleBinding(logger logr.Logger, dda *datadoghqv1alpha1.DatadogAgent, clusterRoleBindingName, serviceAccountName, version string, clusterRoleBinding *rbacv1.ClusterRoleBinding) (reconcile.Result, error) {
+func (r *Reconciler) updateIfNeededKubeStateMetricsClusterRoleBinding(logger logr.Logger, dda *datadoghqv1alpha1.DatadogAgent, clusterRoleBindingName, roleName, serviceAccountName, version string, clusterRoleBinding *rbacv1.ClusterRoleBinding) (reconcile.Result, error) {
 	info := roleBindingInfo{
 		name:               clusterRoleBindingName,
-		roleName:           clusterRoleBindingName,
+		roleName:           roleName,
 		serviceAccountName: serviceAccountName,
 	}
 	newClusterRoleBinding := buildClusterRoleBinding(dda, info, version)
 	if !apiequality.Semantic.DeepEqual(newClusterRoleBinding.Subjects, clusterRoleBinding.Subjects) || !apiequality.Semantic.DeepEqual(newClusterRoleBinding.RoleRef, clusterRoleBinding.RoleRef) {
-		logger.V(1).Info("updateAgentClusterRoleBinding", "clusterRoleBinding.name", clusterRoleBinding.Name)
+		logger.V(1).Info("updateKubeStateMetricsClusterRoleBinding", "clusterRoleBinding.name", clusterRoleBinding.Name)
 		if err := r.client.Update(context.TODO(), newClusterRoleBinding); err != nil {
 			return reconcile.Result{}, err
 		}

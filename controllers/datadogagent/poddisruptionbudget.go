@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadogagent
 
@@ -74,7 +74,7 @@ func (r *Reconciler) createPDB(logger logr.Logger, dda *datadoghqv1alpha1.Datado
 }
 
 func (r *Reconciler) updateIfNeededPDB(dda *datadoghqv1alpha1.DatadogAgent, currentPDB *policyv1.PodDisruptionBudget, builder pdbBuilder) (reconcile.Result, error) {
-	if !ownedByDatadogOperator(currentPDB.OwnerReferences) {
+	if !CheckOwnerReference(dda, currentPDB) {
 		return reconcile.Result{}, nil
 	}
 	newPDB := builder(dda)
@@ -82,7 +82,6 @@ func (r *Reconciler) updateIfNeededPDB(dda *datadoghqv1alpha1.DatadogAgent, curr
 	if !(apiequality.Semantic.DeepEqual(newPDB.Spec, currentPDB.Spec) &&
 		apiequality.Semantic.DeepEqual(newPDB.Labels, currentPDB.Labels) &&
 		apiequality.Semantic.DeepEqual(newPDB.Annotations, currentPDB.Annotations)) {
-
 		updatedPDB := currentPDB.DeepCopy()
 		updatedPDB.Labels = newPDB.Labels
 		updatedPDB.Annotations = newPDB.Annotations
@@ -108,7 +107,7 @@ func (r *Reconciler) cleanupPDB(dda *datadoghqv1alpha1.DatadogAgent, pdbName str
 		}
 		return reconcile.Result{}, err
 	}
-	if ownedByDatadogOperator(pdb.OwnerReferences) {
+	if CheckOwnerReference(dda, pdb) {
 		err = r.client.Delete(context.TODO(), pdb)
 	}
 

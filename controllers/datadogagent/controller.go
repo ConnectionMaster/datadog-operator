@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package datadogagent
 
@@ -33,6 +33,7 @@ const (
 // ReconcilerOptions provides options read from command line
 type ReconcilerOptions struct {
 	SupportExtendedDaemonset bool
+	OperatorMetricsEnabled   bool
 }
 
 // Reconciler is the internal reconciler for Datadog Agent
@@ -63,7 +64,7 @@ func NewReconciler(options ReconcilerOptions, client client.Client, versionInfo 
 // Reconcile is similar to reconciler.Reconcile interface, but taking a context
 func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	resp, err := r.internalReconcile(ctx, request)
-	r.forwarders.ProcessError(getMonitoredObj(request), err)
+	r.metricsForwarderProcessError(request, err)
 	return resp, err
 }
 
@@ -133,18 +134,14 @@ type reconcileFuncInterface func(logger logr.Logger, dda *datadoghqv1alpha1.Data
 
 func (r *Reconciler) updateStatusIfNeeded(logger logr.Logger, agentdeployment *datadoghqv1alpha1.DatadogAgent, newStatus *datadoghqv1alpha1.DatadogAgentStatus, result reconcile.Result, currentError error) (reconcile.Result, error) {
 	now := metav1.NewTime(time.Now())
-	condition.UpdateDatadogAgentStatusConditionsFailure(newStatus, now, datadoghqv1alpha1.ConditionTypeReconcileError, currentError)
+	condition.UpdateDatadogAgentStatusConditionsFailure(newStatus, now, datadoghqv1alpha1.DatadogAgentConditionTypeReconcileError, currentError)
 	if currentError == nil {
-		condition.UpdateDatadogAgentStatusConditions(newStatus, now, datadoghqv1alpha1.ConditionTypeActive, corev1.ConditionTrue, "DatadogAgent reconcile ok", false)
+		condition.UpdateDatadogAgentStatusConditions(newStatus, now, datadoghqv1alpha1.DatadogAgentConditionTypeActive, corev1.ConditionTrue, "DatadogAgent reconcile ok", false)
 	} else {
-		condition.UpdateDatadogAgentStatusConditions(newStatus, now, datadoghqv1alpha1.ConditionTypeActive, corev1.ConditionFalse, "DatadogAgent reconcile error", false)
+		condition.UpdateDatadogAgentStatusConditions(newStatus, now, datadoghqv1alpha1.DatadogAgentConditionTypeActive, corev1.ConditionFalse, "DatadogAgent reconcile error", false)
 	}
 
-	// get metrics forwarder status
-	if metricsCondition := r.forwarders.MetricsForwarderStatusForObj(agentdeployment); metricsCondition != nil {
-		logger.V(1).Info("metrics conditions status not available")
-		condition.SetDatadogAgentStatusCondition(newStatus, metricsCondition)
-	}
+	r.setMetricsForwarderStatus(logger, agentdeployment, newStatus)
 
 	if !apiequality.Semantic.DeepEqual(&agentdeployment.Status, newStatus) {
 		updateAgentDeployment := agentdeployment.DeepCopy()
@@ -160,4 +157,21 @@ func (r *Reconciler) updateStatusIfNeeded(logger logr.Logger, agentdeployment *d
 	}
 
 	return result, currentError
+}
+
+// setMetricsForwarderStatus sets the metrics forwarder status condition if enabled
+func (r *Reconciler) setMetricsForwarderStatus(logger logr.Logger, agentdeployment *datadoghqv1alpha1.DatadogAgent, newStatus *datadoghqv1alpha1.DatadogAgentStatus) {
+	if r.options.OperatorMetricsEnabled {
+		if metricsCondition := r.forwarders.MetricsForwarderStatusForObj(agentdeployment); metricsCondition != nil {
+			logger.V(1).Info("metrics conditions status not available")
+			condition.SetDatadogAgentStatusCondition(newStatus, metricsCondition)
+		}
+	}
+}
+
+// metricsForwarderProcessError convert the reconciler errors into metrics if metrics forwarder is enabled
+func (r *Reconciler) metricsForwarderProcessError(req reconcile.Request, err error) {
+	if r.options.OperatorMetricsEnabled {
+		r.forwarders.ProcessError(getMonitoredObj(req), err)
+	}
 }

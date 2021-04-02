@@ -24,8 +24,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
 var testClusterAgentReplicas int32 = 1
@@ -36,7 +37,7 @@ func clusterAgentDefaultPodSpec() corev1.PodSpec {
 		Containers: []corev1.Container{
 			{
 				Name:            "cluster-agent",
-				Image:           "datadog/cluster-agent:latest",
+				Image:           "gcr.io/datadoghq/cluster-agent:latest",
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Resources:       corev1.ResourceRequirements{},
 				Ports: []corev1.ContainerPort{
@@ -120,8 +121,9 @@ type clusterAgentDeploymentFromInstanceTest struct {
 
 func (test clusterAgentDeploymentFromInstanceTest) Run(t *testing.T) {
 	t.Helper()
-	logf.SetLogger(logf.ZapLogger(true))
-	got, _, err := newClusterAgentDeploymentFromInstance(test.agentdeployment, test.selector)
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
+	logger := logf.Log.WithName(t.Name())
+	got, _, err := newClusterAgentDeploymentFromInstance(logger, test.agentdeployment, test.selector)
 	if test.wantErr {
 		assert.Error(t, err, "newClusterAgentDeploymentFromInstance() expected an error")
 	} else {
@@ -360,6 +362,68 @@ func Test_newClusterAgentDeploymentMountKSMCore(t *testing.T) {
 	)
 	testDCA := clusterAgentDeploymentFromInstanceTest{
 		name:            "with KSM core check custom conf volumes and mounts",
+		agentdeployment: clusterAgentDeployment,
+		newStatus:       &datadoghqv1alpha1.DatadogAgentStatus{},
+		wantErr:         false,
+		want: &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "bar",
+				Name:      "foo-cluster-agent",
+				Labels: map[string]string{"agent.datadoghq.com/name": "foo",
+					"agent.datadoghq.com/component": "cluster-agent",
+					"app.kubernetes.io/instance":    "cluster-agent",
+					"app.kubernetes.io/managed-by":  "datadog-operator",
+					"app.kubernetes.io/name":        "datadog-agent-deployment",
+					"app.kubernetes.io/part-of":     "foo",
+					"app.kubernetes.io/version":     "",
+				},
+			},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							"agent.datadoghq.com/name":      "foo",
+							"agent.datadoghq.com/component": "cluster-agent",
+							"app.kubernetes.io/instance":    "cluster-agent",
+							"app.kubernetes.io/managed-by":  "datadog-operator",
+							"app.kubernetes.io/name":        "datadog-agent-deployment",
+							"app.kubernetes.io/part-of":     "foo",
+							"app.kubernetes.io/version":     "",
+						},
+					},
+					Spec: clusterAgentPodSpec,
+				},
+				Replicas: &testClusterAgentReplicas,
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"agent.datadoghq.com/name":      "foo",
+						"agent.datadoghq.com/component": "cluster-agent",
+					},
+				},
+			},
+		},
+	}
+	testDCA.Run(t)
+}
+
+func Test_newClusterAgentPrometheusScrapeEnabled(t *testing.T) {
+	clusterAgentPodSpec := clusterAgentDefaultPodSpec()
+	clusterAgentDeployment := test.NewDefaultedDatadogAgent(
+		"bar",
+		"foo",
+		&test.NewDatadogAgentOptions{
+			ClusterAgentEnabled: true,
+			Features: &datadoghqv1alpha1.DatadogFeatures{
+				OrchestratorExplorer: &datadoghqv1alpha1.OrchestratorExplorerConfig{Enabled: datadoghqv1alpha1.NewBoolPointer(false)},
+				PrometheusScrape:     &datadoghqv1alpha1.PrometheusScrapeConfig{Enabled: datadoghqv1alpha1.NewBoolPointer(true), ServiceEndpoints: datadoghqv1alpha1.NewBoolPointer(true)}},
+		},
+	)
+
+	logger := logf.Log.WithName(t.Name())
+	clusterAgentPodSpec.Containers[0].Env = append(clusterAgentPodSpec.Containers[0].Env, prometheusScrapeEnvVars(logger, clusterAgentDeployment)...)
+
+	testDCA := clusterAgentDeploymentFromInstanceTest{
+		name:            "Prometheus scrape enabled",
 		agentdeployment: clusterAgentDeployment,
 		newStatus:       &datadoghqv1alpha1.DatadogAgentStatus{},
 		wantErr:         false,
@@ -707,6 +771,14 @@ func Test_newClusterAgentDeploymentFromInstance_MetricsServer(t *testing.T) {
 				Name:  datadoghqv1alpha1.DDExternalMetricsProviderEndpoint,
 				Value: "https://app.datadoghq.eu",
 			},
+			{
+				Name:      datadoghqv1alpha1.DDExternalMetricsProviderAPIKey,
+				ValueFrom: buildEnvVarFromSecret("foo-metrics-server", "api_key"),
+			},
+			{
+				Name:      datadoghqv1alpha1.DDExternalMetricsProviderAppKey,
+				ValueFrom: buildEnvVarFromSecret("extmetrics-app-key-secret-name", "appkey"),
+			},
 		}...,
 	)
 	metricsServerWithSitePodSpec.Containers[0].LivenessProbe = probe
@@ -721,6 +793,13 @@ func Test_newClusterAgentDeploymentFromInstance_MetricsServer(t *testing.T) {
 			MetricsServerWPAController:    true,
 			MetricsServerEndpoint:         "https://app.datadoghq.eu",
 			MetricsServerPort:             metricsServerPort,
+			MetricsServerCredentials: &datadoghqv1alpha1.DatadogCredentials{
+				APIKey: "extmetrics-api-key-literal-foo",
+				APPSecret: &datadoghqv1alpha1.Secret{
+					SecretName: "extmetrics-app-key-secret-name",
+					KeyName:    "appkey",
+				},
+			},
 		})
 
 	tests := clusterAgentDeploymentFromInstanceTestSuite{
@@ -774,7 +853,7 @@ func Test_newClusterAgentDeploymentFromInstance_MetricsServer(t *testing.T) {
 			},
 		},
 		{
-			name:            "with metrics server and endpoint",
+			name:            "with metrics server and endpoint and custom API/APPKeys",
 			agentdeployment: metricsServerAgentWithEndpointDeployment,
 			selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
@@ -1140,7 +1219,7 @@ func TestReconcileDatadogAgent_createNewClusterAgentDeployment(t *testing.T) {
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "TestReconcileDatadogAgent_createNewClusterAgentDeployment"})
 	forwarders := dummyManager{}
 
-	logf.SetLogger(logf.ZapLogger(true))
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 	localLog := logf.Log.WithName("TestReconcileDatadogAgent_createNewClusterAgentDeployment")
 
 	// Register operator types with the runtime scheme.

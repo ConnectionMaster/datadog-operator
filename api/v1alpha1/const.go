@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package v1alpha1
 
@@ -62,6 +62,7 @@ const (
 	DDDogstatsdOriginDetection                   = "DD_DOGSTATSD_ORIGIN_DETECTION"
 	DDDogstatsdPort                              = "DD_DOGSTATSD_PORT"
 	DDDogstatsdSocket                            = "DD_DOGSTATSD_SOCKET"
+	DDDogstatsdMapperProfiles                    = "DD_DOGSTATSD_MAPPER_PROFILES"
 	DDClusterAgentEnabled                        = "DD_CLUSTER_AGENT_ENABLED"
 	DDClusterAgentKubeServiceName                = "DD_CLUSTER_AGENT_KUBERNETES_SERVICE_NAME"
 	DDClusterAgentAuthToken                      = "DD_CLUSTER_AGENT_AUTH_TOKEN"
@@ -100,6 +101,11 @@ const (
 	DDRuntimeSecurityConfigSocket                = "DD_RUNTIME_SECURITY_CONFIG_SOCKET"
 	DDRuntimeSecurityConfigSyscallMonitorEnabled = "DD_RUNTIME_SECURITY_CONFIG_SYSCALL_MONITOR_ENABLED"
 	DDExternalMetricsProviderEndpoint            = "DD_EXTERNAL_METRICS_PROVIDER_ENDPOINT"
+	DDPrometheusScrapeEnabled                    = "DD_PROMETHEUS_SCRAPE_ENABLED"
+	DDPrometheusScrapeServiceEndpoints           = "DD_PROMETHEUS_SCRAPE_SERVICE_ENDPOINTS"
+	DDPrometheusScrapeChecks                     = "DD_PROMETHEUS_SCRAPE_CHECKS"
+	DDExternalMetricsProviderAPIKey              = "DD_EXTERNAL_METRICS_PROVIDER_API_KEY"
+	DDExternalMetricsProviderAppKey              = "DD_EXTERNAL_METRICS_PROVIDER_APP_KEY"
 
 	// KubernetesEnvvarName Env var used by the Datadog Agent container entrypoint
 	// to add kubelet config provider and listener
@@ -107,8 +113,10 @@ const (
 
 	// Datadog volume names and mount paths
 
+	LogDatadogVolumeName               = "logdatadog"
+	LogDatadogVolumePath               = "/var/log/datadog"
 	APMSocketVolumeName                = "apmsocket"
-	APMSocketVolumePath                = "/var/run/datadog"
+	APMSocketVolumePath                = "/var/run/datadog/apm"
 	InstallInfoVolumeName              = "installinfo"
 	InstallInfoVolumeSubPath           = "install_info"
 	InstallInfoVolumePath              = "/etc/datadog-agent/install_info"
@@ -136,7 +144,7 @@ const (
 	CriSocketVolumeName                = "runtimesocketdir"
 	CriSocketVolumeReadOnly            = true
 	DogstatsdSocketVolumeName          = "dsdsocket"
-	DogstatsdSocketVolumePath          = "/var/run/datadog"
+	DogstatsdSocketVolumePath          = "/var/run/datadog/statsd"
 	KubeStateMetricCoreVolumeName      = "ksm-core-config"
 	PointerVolumeName                  = "pointerdir"
 	PointerVolumePath                  = "/opt/datadog-agent/run"

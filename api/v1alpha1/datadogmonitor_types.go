@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2020 Datadog, Inc.
+// Copyright 2016-2021 Datadog, Inc.
 
 package v1alpha1
 
@@ -12,18 +12,19 @@ import (
 
 // DatadogMonitorSpec defines the desired state of DatadogMonitor
 type DatadogMonitorSpec struct {
-	// Query is the Datadog query
+	// Name is the monitor name
+	Name string `json:"name,omitempty"`
+	// Message is a message to include with notifications for this monitor
+	Message string `json:"message,omitempty"`
+	// Priority is an integer from 1 (high) to 5 (low) indicating alert severity
+	Priority int64 `json:"priority,omitempty"`
+	// Query is the Datadog monitor query
 	Query string `json:"query,omitempty"`
+	// Tags is the monitor tags associated with your monitor
+	Tags []string `json:"tags,omitempty"`
 	// Type is the monitor type
 	Type DatadogMonitorType `json:"type,omitempty"`
-	// Title is the monitor title
-	Title string `json:"title,omitempty"`
-	// Message is the message to include in a monitor notification
-	Message string `json:"message,omitempty"`
-	// Tags is the monitor tags used to organize monitors
-	Tags []string `json:"tags,omitempty"`
-
-	// Options are the optional parameters of a monitor
+	// Options are the optional parameters associated with your monitor
 	Options DatadogMonitorOptions `json:"options,omitempty"`
 }
 
@@ -31,33 +32,75 @@ type DatadogMonitorSpec struct {
 type DatadogMonitorType string
 
 const (
-	// DatadogMonitorTypeMetric is the metric alert monitor
-	DatadogMonitorTypeMetric DatadogMonitorType = "metric"
+	// DatadogMonitorTypeMetric is the metric alert monitor type
+	DatadogMonitorTypeMetric DatadogMonitorType = "metric alert"
+	// DatadogMonitorTypeQuery is the query alert monitor type
+	DatadogMonitorTypeQuery DatadogMonitorType = "query alert"
+	// DatadogMonitorTypeService is the service check monitor type
+	DatadogMonitorTypeService DatadogMonitorType = "service check"
+	// DatadogMonitorTypeComposite is the composite alert monitor type
+	DatadogMonitorTypeComposite DatadogMonitorType = "composite"
 )
 
 // DatadogMonitorOptions define the optional parameters of a monitor
 type DatadogMonitorOptions struct {
+	// A message to include with a re-notification.
+	EscalationMessage *string `json:"escalationMessage,omitempty"`
 	// Time (in seconds) to delay evaluation, as a non-negative integer. For example, if the value is set to 300 (5min),
 	// the timeframe is set to last_5m and the time is 7:00, the monitor evaluates data from 6:50 to 6:55.
 	// This is useful for AWS CloudWatch and other backfilled metrics to ensure the monitor always has data during evaluation.
-	EvaluationDelay int `json:"evaluationDelay,omitempty"`
+	EvaluationDelay *int64 `json:"evaluationDelay,omitempty"`
+	// A Boolean indicating whether notifications from this monitor automatically inserts its triggering tags into the title.
+	IncludeTags *bool `json:"includeTags,omitempty"`
 	// Whether or not the monitor is locked (only editable by creator and admins).
-	Locked bool `json:"locked,omitempty"`
+	Locked *bool `json:"locked,omitempty"`
 	// Time (in seconds) to allow a host to boot and applications to fully start before starting the evaluation of
 	// monitor results. Should be a non negative integer.
-	NewHostDelay int `json:"newHostDelay,omitempty"`
+	NewHostDelay *int64 `json:"newHostDelay,omitempty"`
 	// The number of minutes before a monitor notifies after data stops reporting. Datadog recommends at least 2x the
 	// monitor timeframe for metric alerts or 2 minutes for service checks. If omitted, 2x the evaluation timeframe
 	// is used for metric alerts, and 24 hours is used for service checks.
-	NoDataTimeframe int `json:"noDataTimeframe,omitempty"`
+	NoDataTimeframe *int64 `json:"noDataTimeframe,omitempty"`
+	// A Boolean indicating whether tagged users are notified on changes to this monitor.
+	NotifyAudit *bool `json:"notifyAudit,omitempty"`
 	// A Boolean indicating whether this monitor notifies when data stops reporting.
-	NotifyNoData bool `json:"notifyNoData,omitempty"`
+	NotifyNoData *bool `json:"notifyNoData,omitempty"`
 	// The number of minutes after the last notification before a monitor re-notifies on the current status.
 	// It only re-notifies if it’s not resolved.
-	RenotifyInterval int `json:"renotifyInterval,omitempty"`
+	RenotifyInterval *int64 `json:"renotifyInterval,omitempty"`
 	// A Boolean indicating whether this monitor needs a full window of data before it’s evaluated. We highly
 	// recommend you set this to false for sparse metrics, otherwise some evaluations are skipped. Default is false.
-	RequireFullWindow bool `json:"requireFullWindow,omitempty"`
+	RequireFullWindow *bool `json:"requireFullWindow,omitempty"`
+	// The number of hours of the monitor not reporting data before it automatically resolves from a triggered state.
+	TimeoutH *int64 `json:"timeoutH,omitempty"`
+	// A struct of the different monitor threshold values.
+	Thresholds *DatadogMonitorOptionsThresholds `json:"thresholds,omitempty"`
+	// A struct of the alerting time window options.
+	ThresholdWindows *DatadogMonitorOptionsThresholdWindows `json:"thresholdWindows,omitempty"`
+}
+
+// DatadogMonitorOptionsThresholds is a struct of the different monitor threshold values
+type DatadogMonitorOptionsThresholds struct {
+	// The monitor CRITICAL threshold.
+	Critical *string `json:"critical,omitempty"`
+	// The monitor CRITICAL recovery threshold.
+	CriticalRecovery *string `json:"criticalRecovery,omitempty"`
+	// The monitor OK threshold.
+	OK *string `json:"ok,omitempty"`
+	// The monitor UNKNOWN threshold.
+	Unknown *string `json:"unknown,omitempty"`
+	// The monitor WARNING threshold.
+	Warning *string `json:"warning,omitempty"`
+	// The monitor WARNING recovery threshold.
+	WarningRecovery *string `json:"warningRecovery,omitempty"`
+}
+
+// DatadogMonitorOptionsThresholdWindows is a struct of the alerting time window options
+type DatadogMonitorOptionsThresholdWindows struct {
+	// Describes how long an anomalous metric must be normal before the alert recovers.
+	RecoveryWindow *string `json:"recoveryWindow,omitempty"`
+	// Describes how long a metric must be anomalous before an alert triggers.
+	TriggerWindow *string `json:"triggerWindow,omitempty"`
 }
 
 // DatadogMonitorStatus defines the observed state of DatadogMonitor
@@ -69,16 +112,30 @@ type DatadogMonitorStatus struct {
 
 	// ID is the monitor ID generated in Datadog
 	ID int `json:"id,omitempty"`
+	// Creator is the identify of the monitor creator
+	Creator string `json:"creator,omitempty"`
+	// Created is the time the monitor was created
+	Created *metav1.Time `json:"created,omitempty"`
 	// MonitorState is the overall state of monitor
 	MonitorState DatadogMonitorState `json:"monitorState,omitempty"`
+	// MonitorStateLastUpdateTime is the last time the monitor state updated
+	MonitorStateLastUpdateTime *metav1.Time `json:"monitorStateLastUpdateTime,omitempty"`
+	// MonitorStateLastTransitionTime is the last time the monitor state changed
+	MonitorStateLastTransitionTime *metav1.Time `json:"monitorStateLastTransitionTime,omitempty"`
+	// SyncStatus shows the health of syncing the monitor state to Datadog
+	SyncStatus SyncStatusMessage `json:"syncStatus,omitempty"`
 	// TriggeredState only includes details for monitor groups that are triggering
 	TriggeredState []DatadogMonitorTriggeredState `json:"triggeredState,omitempty"`
 	// DowntimeStatus defines whether the monitor is downtimed
 	DowntimeStatus DatadogMonitorDowntimeStatus `json:"downtimeStatus,omitempty"`
-	// Creator is the identify of the monitor creator
-	Creator string `json:"creator,omitempty"`
-	// Created is the time the monitor was created
-	Created metav1.Time `json:"created,omitempty"`
+
+	// Primary defines whether the monitor is managed by the Kubernetes custom
+	// resource (true) or outside Kubernetes (false)
+	Primary bool `json:"primary,omitempty"`
+
+	// CurrentHash tracks the hash of the current DatadogMonitorSpec to know
+	// if the Spec has changed and needs an update
+	CurrentHash string `json:"currentHash,omitempty"`
 }
 
 // DatadogMonitorCondition describes the current state of a DatadogMonitor
@@ -108,8 +165,8 @@ type DatadogMonitorConditionType string
 const (
 	// DatadogMonitorConditionTypeCreated means the DatadogMonitor is created successfully
 	DatadogMonitorConditionTypeCreated DatadogMonitorConditionType = "Created"
-	// DatadogMonitorConditionTypePending means the DatadogMonitor is pending
-	DatadogMonitorConditionTypePending DatadogMonitorConditionType = "Pending"
+	// DatadogMonitorConditionTypeActive means the DatadogMonitor is active
+	DatadogMonitorConditionTypeActive DatadogMonitorConditionType = "Active"
 	// DatadogMonitorConditionTypeUpdated means the DatadogMonitor is updated
 	DatadogMonitorConditionTypeUpdated DatadogMonitorConditionType = "Updated"
 	// DatadogMonitorConditionTypeError means the DatadogMonitor has an error
@@ -136,6 +193,20 @@ const (
 	DatadogMonitorStateUnknown DatadogMonitorState = "Unknown"
 )
 
+// SyncStatusMessage is the message reflecting the health of monitor state syncs to Datadog
+type SyncStatusMessage string
+
+const (
+	// SyncStatusOK means syncing is OK
+	SyncStatusOK SyncStatusMessage = "OK"
+	// SyncStatusValidateError means there is a monitor validation error
+	SyncStatusValidateError SyncStatusMessage = "error validating monitor"
+	// SyncStatusUpdateError means there is a monitor update error
+	SyncStatusUpdateError SyncStatusMessage = "error updating monitor"
+	// SyncStatusGetError means there is an error getting the monitor
+	SyncStatusGetError SyncStatusMessage = "error getting monitor"
+)
+
 // DatadogMonitorTriggeredState represents the details of a triggering DatadogMonitor
 // The DatadogMonitor is triggering if one of its groups is in Alert, Warn, or No Data
 type DatadogMonitorTriggeredState struct {
@@ -151,14 +222,16 @@ type DatadogMonitorDowntimeStatus struct {
 	DowntimeID  int  `json:"downtimeId,omitempty"`
 }
 
-// DatadogMonitor is the Schema for the datadogmonitor API
+// DatadogMonitor allows to define and manage Monitors from your Kubernetes Cluster
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=datadogmonitors,scope=Namespaced
 // +kubebuilder:printcolumn:name="id",type="string",JSONPath=".status.id"
-// +kubebuilder:printcolumn:name="created",type="string",JSONPath=".status.conditions[?(@.type=='Created')].status"
 // +kubebuilder:printcolumn:name="monitor state",type="string",JSONPath=".status.monitorState"
-// +kubebuilder:printcolumn:name="last updated",type="date",JSONPath=".status.conditions[?(@.type=='Updated')].lastUpdateTime"
+// +kubebuilder:printcolumn:name="last transition",type="string",JSONPath=".status.monitorStateLastTransitionTime"
+// +kubebuilder:printcolumn:name="last sync",type="string",format="date",JSONPath=".status.monitorStateLastUpdateTime"
+// +kubebuilder:printcolumn:name="sync status",type="string",JSONPath=".status.syncStatus"
+// +kubebuilder:printcolumn:name="age",type="date",JSONPath=".metadata.creationTimestamp"
 // +k8s:openapi-gen=true
 // +genclient
 type DatadogMonitor struct {

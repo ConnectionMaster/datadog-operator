@@ -1,7 +1,7 @@
 // Unless explicitly stated otherwise all files in this repository are licensed
 // under the Apache License Version 2.0.
 // This product includes software developed at Datadog (https://www.datadoghq.com/).
-// Copyright 2016-2019 Datadog, Inc.
+// Copyright 2016-present Datadog, Inc.
 
 package v1alpha1
 
@@ -20,17 +20,17 @@ import (
 // default values
 const (
 	DefaultLogLevel                       string = "INFO"
-	defaultAgentImage                     string = "datadog/agent:latest"
+	defaultAgentImage                     string = "gcr.io/datadoghq/agent:latest"
 	defaultCollectEvents                  bool   = false
 	defaultLeaderElection                 bool   = false
 	defaultDockerSocketPath               string = "/var/run/docker.sock"
 	defaultDogstatsdOriginDetection       bool   = false
 	defaultUseDogStatsDSocketVolume       bool   = false
-	defaultDogstatsdSocketName            string = "statsd.sock"
-	defaultDogstatsdSocketPath            string = "/var/run/datadog"
+	defaultHostDogstatsdSocketName        string = "statsd.sock"
+	defaultHostDogstatsdSocketPath        string = "/var/run/datadog"
 	defaultApmEnabled                     bool   = false
-	defaultApmSocketName                  string = "apm.sock"
-	defaultApmSocketPath                  string = "/var/run/datadog"
+	defaultHostApmSocketName              string = "apm.sock"
+	defaultHostApmSocketPath              string = "/var/run/datadog"
 	defaultLogEnabled                     bool   = false
 	defaultLogsConfigContainerCollectAll  bool   = false
 	defaultLogsContainerCollectUsingFiles bool   = true
@@ -47,10 +47,12 @@ const (
 	defaultClusterChecksEnabled                          bool   = false
 	DefaultKubeStateMetricsCoreConf                      string = "kube-state-metrics-core-config"
 	defaultKubeStateMetricsCoreEnabled                   bool   = false
+	defaultPrometheusScrapeEnabled                       bool   = false
+	defaultPrometheusScrapeServiceEndpoints              bool   = false
 	defaultClusterAgentReplicas                          int32  = 1
 	defaultAgentCanaryReplicas                           int32  = 1
-	defaultClusterChecksRunnerReplicas                   int32  = 2
-	defaultClusterAgentImage                             string = "datadog/cluster-agent:latest"
+	defaultClusterChecksRunnerReplicas                   int32  = 1
+	defaultClusterAgentImage                             string = "gcr.io/datadoghq/cluster-agent:latest"
 	defaultRollingUpdateMaxUnavailable                          = "10%"
 	defaultUpdateStrategy                                       = appsv1.RollingUpdateDaemonSetStrategyType
 	defaultRollingUpdateMaxPodSchedulerFailure                  = "10%"
@@ -113,6 +115,9 @@ func IsDefaultedDatadogAgent(ad *DatadogAgent) bool {
 		if !IsDefaultedKubeStateMetricsCore(ad.Spec.Features.KubeStateMetricsCore) {
 			return false
 		}
+		if !IsDefaultedPrometheusScrape(ad.Spec.Features.PrometheusScrape) {
+			return false
+		}
 	}
 
 	if ad.Spec.ClusterAgent != nil {
@@ -133,6 +138,10 @@ func IsDefaultedDatadogAgent(ad *DatadogAgent) bool {
 		}
 
 		if ad.Spec.ClusterAgent.Replicas == nil {
+			return false
+		}
+
+		if BoolValue(ad.Spec.ClusterAgent.Config.ClusterChecksEnabled) && ad.Spec.ClusterChecksRunner == nil {
 			return false
 		}
 	}
@@ -207,9 +216,28 @@ func IsDefaultedKubeStateMetricsCore(ksmCore *KubeStateMetricsCore) bool {
 	if ksmCore == nil {
 		return false
 	}
+
 	if ksmCore.Enabled == nil {
 		return false
 	}
+
+	return true
+}
+
+// IsDefaultedPrometheusScrape returns whether Prometheus Scrape config is defauled
+func IsDefaultedPrometheusScrape(prom *PrometheusScrapeConfig) bool {
+	if prom == nil {
+		return false
+	}
+
+	if prom.Enabled == nil {
+		return false
+	}
+
+	if prom.ServiceEndpoints == nil {
+		return false
+	}
+
 	return true
 }
 
@@ -471,6 +499,7 @@ func DefaultDatadogAgentSpecAgent(agent *DatadogAgentSpecAgentSpec) *DatadogAgen
 	if agent.UseExtendedDaemonset == nil {
 		agent.UseExtendedDaemonset = NewBoolPointer(false)
 	}
+
 	DefaultDatadogAgentSpecAgentImage(&agent.Image)
 	DefaultDatadogAgentSpecAgentConfig(&agent.Config)
 	DefaultDatadogAgentSpecRbacConfig(&agent.Rbac)
@@ -479,6 +508,7 @@ func DefaultDatadogAgentSpecAgent(agent *DatadogAgentSpecAgentSpec) *DatadogAgen
 	DefaultDatadogAgentSpecAgentLog(&agent.Log)
 	DefaultDatadogAgentSpecAgentProcess(&agent.Process)
 	DefaultNetworkPolicy(&agent.NetworkPolicy)
+
 	return agent
 }
 
@@ -579,9 +609,10 @@ func DefaultConfigDogstatsdUDS(uds *DSDUnixDomainSocketSpec) *DSDUnixDomainSocke
 	}
 
 	if uds.HostFilepath == nil {
-		socketPath := path.Join(defaultDogstatsdSocketPath, defaultDogstatsdSocketName)
+		socketPath := path.Join(defaultHostDogstatsdSocketPath, defaultHostDogstatsdSocketName)
 		uds.HostFilepath = &socketPath
 	}
+
 	return uds
 }
 
@@ -695,9 +726,10 @@ func DefaultDatadogAgentSpecAgentApmUDS(uds *APMUnixDomainSocketSpec) *APMUnixDo
 	}
 
 	if uds.HostFilepath == nil {
-		socketPath := path.Join(defaultApmSocketPath, defaultApmSocketName)
+		socketPath := path.Join(defaultHostApmSocketPath, defaultHostApmSocketName)
 		uds.HostFilepath = &socketPath
 	}
+
 	return uds
 }
 
@@ -762,8 +794,11 @@ func DefaultFeatures(ft *DatadogFeatures) *DatadogFeatures {
 	if ft == nil {
 		return &DatadogFeatures{}
 	}
+
 	ft.OrchestratorExplorer = DefaultDatadogFeatureOrchestratorExplorer(ft.OrchestratorExplorer)
 	ft.KubeStateMetricsCore = DefaultDatadogFeatureKubeStateMetricsCore(ft.KubeStateMetricsCore)
+	ft.PrometheusScrape = DefaultDatadogFeaturePrometheusScrape(ft.PrometheusScrape)
+
 	return ft
 }
 
@@ -799,6 +834,23 @@ func DefaultDatadogFeatureKubeStateMetricsCore(ksmCore *KubeStateMetricsCore) *K
 	return ksmCore
 }
 
+// DefaultDatadogFeaturePrometheusScrape used to default the Prometheus Scrape config
+func DefaultDatadogFeaturePrometheusScrape(prom *PrometheusScrapeConfig) *PrometheusScrapeConfig {
+	if prom == nil {
+		prom = &PrometheusScrapeConfig{}
+	}
+
+	if prom.Enabled == nil {
+		prom.Enabled = NewBoolPointer(defaultPrometheusScrapeEnabled)
+	}
+
+	if prom.ServiceEndpoints == nil {
+		prom.ServiceEndpoints = NewBoolPointer(defaultPrometheusScrapeServiceEndpoints)
+	}
+
+	return prom
+}
+
 // DefaultDatadogAgentSpecClusterAgent used to default an DatadogAgentSpecClusterAgentSpec
 // return the defaulted DatadogAgentSpecClusterAgentSpec
 func DefaultDatadogAgentSpecClusterAgent(clusterAgent *DatadogAgentSpecClusterAgentSpec) *DatadogAgentSpecClusterAgentSpec {
@@ -806,9 +858,11 @@ func DefaultDatadogAgentSpecClusterAgent(clusterAgent *DatadogAgentSpecClusterAg
 	DefaultDatadogAgentSpecClusterAgentConfig(&clusterAgent.Config)
 	DefaultDatadogAgentSpecRbacConfig(&clusterAgent.Rbac)
 	DefaultNetworkPolicy(&clusterAgent.NetworkPolicy)
+
 	if clusterAgent.Replicas == nil {
 		clusterAgent.Replicas = NewInt32Pointer(defaultClusterAgentReplicas)
 	}
+
 	return clusterAgent
 }
 
@@ -852,6 +906,7 @@ func GetKubeStateMetricsConfName(dcaConf *DatadogAgent) string {
 	if dcaConf.Spec.Features.KubeStateMetricsCore.Conf != nil && dcaConf.Spec.Features.KubeStateMetricsCore.Conf.ConfigMap != nil {
 		return dcaConf.Spec.Features.KubeStateMetricsCore.Conf.ConfigMap.Name
 	}
+
 	return fmt.Sprintf("%s-%s", dcaConf.Name, DefaultKubeStateMetricsCoreConf)
 }
 
@@ -884,9 +939,11 @@ func DefaultDatadogAgentSpecClusterChecksRunner(clusterChecksRunner *DatadogAgen
 	DefaultDatadogAgentSpecClusterChecksRunnerConfig(&clusterChecksRunner.Config)
 	DefaultDatadogAgentSpecRbacConfig(&clusterChecksRunner.Rbac)
 	DefaultNetworkPolicy(&clusterChecksRunner.NetworkPolicy)
+
 	if clusterChecksRunner.Replicas == nil {
 		clusterChecksRunner.Replicas = NewInt32Pointer(defaultClusterChecksRunnerReplicas)
 	}
+
 	return clusterChecksRunner
 }
 
